@@ -1,78 +1,165 @@
 # Low-Level Systems in Rust
 
-A guide to a CS:APP-style systems course taught entirely in Rust. It has fourteen modules and five capstone projects, and takes about 10–12 weeks at 6–8 hours a week.
+A systems course taught entirely in Rust, in the style of CS:APP. It **starts from zero**: you don't need any C, assembly or hardware knowledge, only the Rust you already write and the idea of bits and bytes. Each new idea is built only from ideas covered before it.
 
-This README summarises the full course. Each module section below covers the main ideas, what you build or break, and the one-line rule the module ends on.
-
-> **Thesis.** C teaches low-level concepts by letting you break things. Rust teaches the same concepts by making you *name* them. Every C bug class has a Rust type, lint or `unsafe` contract that exists because of it. Each module therefore does three things:
-> 1. it shows the machine,
-> 2. it shows the C habit,
-> 3. it shows which Rust construct encodes the rule.
+This README summarises the full course. Each lesson and module section below covers the main ideas, what you build or break, and the one-line rule it ends on.
 
 ---
 
 ## Contents
 
-- [Who it's for](#who-its-for)
-- [How to work through it](#how-to-work-through-it)
+- [How this course works](#how-this-course-works)
+- [The map](#the-map)
 - [Setup](#setup)
+- [Part 0 — Foundations](#part-0--foundations)
 - [Module map](#module-map)
 - [Modules 0–13](#module-0--the-toolkit-seeing-what-the-machine-sees)
 - [Capstone projects](#capstone-projects)
 - [Suggested pacing](#suggested-pacing)
 - [Reading list](#reading-list)
 - [The rules, in one place](#the-rules-in-one-place)
+- [Glossary](#glossary)
 
 ---
 
-## Who it's for
+## How this course works
 
-You should already be comfortable with ownership, `Drop`, `Rc<RefCell<_>>` and `impl` vs `dyn`. Some exposure to byte-level layouts also helps, for example Solana's Token-2022 accounts (the 82-byte mint base, `COption`'s 4-byte tag and TLV extension entries).
+The course follows five rules:
 
-The course explains *why* those things look the way they do. Throughout the material, **↔ you've seen this** marks a link back to earlier Rust or Solana work, such as Anchor, the SPL token programs and Token-2022.
+1. **Ask before assuming.** Before a lesson uses a concept, the course checks that you have it. If you don't, that concept gets its own lesson first.
+2. **One idea at a time.** Each lesson ends with a short check. Move on only when you can answer it without notes. If you can't, the explanation was the problem, so try a different one.
+3. **Every term defined on first use.** Jargon gets a plain-words definition the first time it appears, and the [Glossary](#glossary) collects them all.
+4. **Predict, then run.** Write your guess down before running anything. A wrong guess shows exactly which part of your mental picture needs fixing.
+5. **Write the rule.** Each lesson ends with a one-line rule. Rewrite it in your own words.
 
-## How to work through it
+**Bridges.** The course assumes you know ownership, `Drop`, `Rc<RefCell<_>>` and `impl` vs `dyn`, plus Token-2022 byte layouts from earlier Solana work (toodoo and Token22-CT). Sections marked **↔ you've seen this** connect new ideas back to that work.
 
-Each module follows the same four-step loop:
+## The map
 
-1. **Predict.** Before you run any snippet, write down what you expect: a size, an address pattern or an output. The wrong predictions are where the learning happens.
-2. **Run and look.** Print the value, disassemble the code or run it under Miri. Don't trust a mental model you haven't checked against the machine.
-3. **Break it on purpose.** Every module has one exercise where you cause the bug that C would allow, then watch Rust or Miri catch it.
-4. **Write the rule.** Each module ends with a one-line rule. Rewrite it in your own words.
-
-The exercises have **no published solutions**. If you get stuck, take your attempt and your prediction to a peer or mentor rather than starting from a blank page.
+| Part | Lessons | What it gives you | Status |
+|------|---------|-------------------|--------|
+| 0. Foundations | F1–F6 | The vocabulary: hex, memory, CPU, registers, instructions, the stack, the compiler | F1 done, F2 in progress |
+| 1. Tools | Modules 0, 0.5 | Seeing what the machine actually did: `cargo asm`, Miri, reading assembly | Done once at full speed; re-read after F6 |
+| 2. Core | Modules 1–13 | Integers, memory layout, pointers, allocation, FFI, concurrency, the OS, bare metal | Not started |
+| 3. Capstones | 5 projects | Putting several modules together | Not started |
 
 ## Setup
 
 - A current **stable** Rust toolchain on edition 2024.
-- **Nightly**, for Miri and the sanitizers: `rustup +nightly component add miri`.
-- **Linux x86-64**, or WSL2. macOS works for everything except the raw syscalls in Module 12.
+- **Nightly**, for Miri: `rustup +nightly component add miri`.
+- **Ubuntu**, with `gdb`, `strace` and `perf` installed.
+
+---
+
+## Part 0 — Foundations
+
+Six short lessons that give you the words the rest of the course is written in. Each lesson needs only the ones before it.
+
+### F1 — Hexadecimal
+
+Hex is a short way of writing binary: **one hex digit stands for exactly four bits.**
+
+- **The problem:** binary is how the machine stores everything, but it's hard for people to read. 32767 in 16 bits is `0111111111111111`, and addresses are 48 bits or more.
+- **The trick is to group bits in fours.** Four bits have 16 possible patterns, so each pattern gets one symbol: `0`–`9`, then `A`–`F` for 10–15.
+- **Binary to hex is just regrouping:** `0111 1111 1111 1111` → `7 F F F` → `0x7FFF`. The `0x` prefix is a label meaning "this is hex"; it isn't part of the value.
+- **Place value:** in decimal, each position is worth 10× the one to its right. In hex, positions are worth **1, 16, 256, 4096…**, each 16× the one to its right. To get the value, multiply each digit by its position's worth, then add:
+  - `0xFF` = 15×16 + 15 = **255**
+  - `0xC3` = 12×16 + 3 = **195**
+  - `0x2A` = 2×16 + 10 = **42**
+- **Decimal to hex:** divide by 16; the remainder is the rightmost digit; repeat with the quotient. For 200: 200 ÷ 16 = 12 remainder 8, then 12 ÷ 16 = 0 remainder 12 (`C`). Reading the remainders upward gives `0xC8`.
+- **Why programmers use hex everywhere:** one byte is always exactly two hex digits (`0x00`–`0xFF`), so you can read bytes straight off a hex number. A `u32` is 8 hex digits and a `u64` is 16. Decimal hides the bits; hex shows them.
+
+For big conversions, let Rust do the work:
+
+```rust
+let n = 32767;
+println!("{n:b}");   // binary
+println!("{n:#x}");  // 0x7fff
+let m = 0xFF;        // hex literals work too
+```
+
+`src/main.rs` in this repo is this snippet; run it with `cargo run`.
+
+**Check:**
+1. Write `0x2A` in binary and decimal.
+2. Write `1100 0011` in hex.
+3. How many hex digits are in a `u64`?
+4. Write 100 in hex by dividing by 16.
+5. 32767 is `0x7FFF`. What is 32766, and which bit differs?
+
+> **Rule:** One hex digit is four bits, and each position is worth 16× the one to its right.
+
+### F2 — Memory
+
+**Memory is a long row of boxes. Each box holds exactly one byte, and each box has a number, called its address.**
+
+- A running program keeps its data in **RAM**. Unlike the disk, which keeps files when the power is off, RAM is fast and is wiped when the program ends.
+- An address is a position number, like a house number on a very long street. It goes up by one per box and is written in hex.
+
+```text
+address:  0x1000  0x1001  0x1002  0x1003  0x1004  0x1005  ...
+         ┌──────┬──────┬──────┬──────┬──────┬──────┐
+contents:│  2A  │  FF  │  00  │  07  │  C3  │  64  │ ...
+         └──────┴──────┴──────┴──────┴──────┴──────┘
+```
+
+- Memory can do only two things: **read** ("give me the byte at address X") and **write** ("put this byte at address X"). Variables, arrays, strings and `Vec` are all built on those two operations.
+- **Values bigger than a byte** take several boxes in a row. A `u32` takes 4, and its address is the address of its **first** box. An array of four `u32`s is 16 boxes, with each element starting 4 boxes after the previous one.
+- **Addresses are numbers too**, so they can be stored in memory. On a 64-bit machine an address is 8 bytes, which is why `usize` is 8 bytes. ↔ At the machine level, a Rust reference `&x` is just the address of `x`'s first box. The borrow rules are checked at compile time.
+
+**Check:** predict, then run. How much does the address go up from one element to the next, and why?
+
+```rust
+fn main() {
+    let arr: [u32; 4] = [10, 20, 30, 40];
+    for i in 0..4 {
+        println!("arr[{i}] = {} lives at {:p}", arr[i], &arr[i]);
+    }
+}
+```
+
+1. A `u64` is at `0x1000`. Which addresses does it occupy?
+2. A `[u32; 3]` starts at `0x2000`. What is the address of element `[2]`?
+3. Miri said the array was `16 bytes` and you read at `+0x10`. What is `0x10` in decimal, and why is that one past the end?
+
+> **Rule:** Memory is numbered one-byte boxes; a value's address is the number of its first box.
+
+### Coming up in Part 0
+
+- **F3 — The CPU and registers:** the part of the computer that does the work, and the handful of tiny, fast storage slots inside it.
+- **F4 — Instructions and assembly syntax:** the CPU's vocabulary, and how to read one line of it.
+- **F5 — The stack and the stack pointer:** how each function call gets scratch space, and how it finds its way back.
+- **F6 — The compiler:** how your Rust becomes all of the above, and why debug and release builds differ.
+
+Each of these lessons starts with a quick check of what you already know.
 
 ---
 
 ## Module map
 
-| # | Module | Core question |
-|---|--------|---------------|
-| 0 | The toolkit | How do I see what the compiler actually produced? |
-| 0.5 | Reading x86-64 assembly | What do the ~30 instructions I'll meet mean? |
-| 1 | Bits, bytes and integers | What does a bit pattern *mean*? |
-| 2 | The process memory map | Where does each value live, and for how long? |
-| 3 | Pointers, references and `unsafe` | What does a pointer promise, and who checks it? |
-| 4 | Arrays, slices and strings | Why do buffer overflows exist, and how does a fat pointer prevent them? |
-| 5 | Layout: size, alignment, padding, `repr` | How are types laid out in memory? |
-| 6 | Dynamic memory | How do `Vec` and `malloc` actually work? |
-| 7 | Functions, ABI and dispatch | Which code runs, and where does its data come from? |
-| 8 | FFI | How do Rust and C talk safely? |
-| 9 | Bytes on the wire | How do I parse untrusted binary data? |
-| 10 | Caches and performance | Why is memory layout performance? |
-| 11 | Concurrency, atomics, ordering | How do data races become type errors? |
-| 12 | The OS boundary | What do syscalls, file descriptors and virtual memory look like from Rust? |
-| 13 | `no_std` and bare metal | What's left when the OS is gone? |
+| # | Module | Core question | Needs |
+|---|--------|---------------|-------|
+| 0 | The toolkit | How do I see what the compiler actually produced? | F1–F6 |
+| 0.5 | Reading x86-64 assembly | What do the ~30 instructions I'll meet mean? | F3, F4 |
+| 1 | Bits, bytes and integers | What does a bit pattern *mean*? | |
+| 2 | The process memory map | Where does each value live, and for how long? | |
+| 3 | Pointers, references and `unsafe` | What does a pointer promise, and who checks it? | |
+| 4 | Arrays, slices and strings | Why do buffer overflows exist, and how does a fat pointer prevent them? | |
+| 5 | Layout: size, alignment, padding, `repr` | How are types laid out in memory? | |
+| 6 | Dynamic memory | How do `Vec` and `malloc` actually work? | |
+| 7 | Functions, ABI and dispatch | Which code runs, and where does its data come from? | |
+| 8 | FFI | How do Rust and C talk safely? | |
+| 9 | Bytes on the wire | How do I parse untrusted binary data? | |
+| 10 | Caches and performance | Why is memory layout performance? | |
+| 11 | Concurrency, atomics, ordering | How do data races become type errors? | |
+| 12 | The OS boundary | What do syscalls, file descriptors and virtual memory look like from Rust? | |
+| 13 | `no_std` and bare metal | What's left when the OS is gone? | |
 
 ---
 
 ## Module 0 — The toolkit: seeing what the machine sees
+
+> **Needs:** F1–F6. This module was first done at full speed before Part 0 existed. Re-read it once F6 is done; it will read very differently.
 
 You can't learn low-level programming by reading source. You learn it by looking at what the source became. Set these tools up before anything else:
 
@@ -96,6 +183,8 @@ Two more tools come up often: `std::hint::black_box`, which stops the optimiser 
 > **Rule:** Source is a request; assembly is what happened. Check the machine before you trust the model.
 
 ## Module 0.5 — Reading x86-64 assembly
+
+> **Needs:** F3 (registers) and F4 (instructions). Treat this page as a lookup reference after those lessons, not something to read cold.
 
 This is a reference page. You need to *read* about 30 instructions, not write them.
 
@@ -501,8 +590,10 @@ About 12 weeks at 6–8 hours a week:
 
 ## The rules, in one place
 
-| Module | Rule |
-|--------|------|
+| Lesson / module | Rule |
+|-----------------|------|
+| F1 Hex | One hex digit is four bits; each position is worth 16× the one to its right. |
+| F2 Memory | Memory is numbered one-byte boxes; a value's address is the number of its first box. |
 | 0 Toolkit | Source is a request; assembly is what happened. |
 | 0.5 Assembly | Result on the left, arguments in `rdi, rsi`, answer in `rax`. |
 | 1 Integers | A type is an interpretation of bits. Decide width, conversion and overflow on purpose. |
@@ -518,3 +609,17 @@ About 12 weeks at 6–8 hours a week:
 | 11 Concurrency | `Send`/`Sync` make races type errors; pick the weakest ordering you can prove. |
 | 12 OS | A descriptor is a claim ticket; give it exactly one owner. |
 | 13 `no_std` | Remove `std` and nothing about the machine changes; you just see it. |
+
+## Glossary
+
+Every term in plain words, in the order the course introduces it. The doc adds to it with each lesson.
+
+| Term | Plain meaning | Introduced |
+|------|---------------|------------|
+| Bit | One 0 or 1 | already known |
+| Byte | 8 bits; values 0–255 | already known |
+| Hexadecimal (hex) | Base-16 numbers; one digit = 4 bits; written with `0x` | F1 |
+| Place value | Each position in a number is worth a fixed multiple of the one to its right (10 in decimal, 2 in binary, 16 in hex) | F1 |
+| RAM / memory | Fast storage a running program uses; wiped when the program ends | F2 |
+| Address | The number of one box (one byte) in memory | F2 |
+| Reference (`&x`), at machine level | The address of `x`'s first byte | F2 |
